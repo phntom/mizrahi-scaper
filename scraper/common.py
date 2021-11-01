@@ -8,6 +8,7 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 @dataclass
 class ScrapeResults:
+    account = ''
     nis = 0.0
     usd = 0.0
     eur = 0.0

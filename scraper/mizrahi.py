@@ -16,6 +16,7 @@ def scrape(target, capabilities):
         command_executor=target,
         desired_capabilities=capabilities,
     )
+    driver.maximize_window()
     driver.get("https://www.mizrahi-tefahot.co.il/")
     try:
         scrape_detect_login(driver)
