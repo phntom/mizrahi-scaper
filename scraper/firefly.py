@@ -21,16 +21,25 @@ def api_call(request, params=None, method='GET',
     return r.json()
 
 
+def get_accounts(endpoint: str):
+    accounts = api_call('accounts', {
+        'page': '1',
+        'type': 'asset',
+    }, 'GET', endpoint)
+    yield from accounts['data']
+    for page in range(1, accounts['meta']['pagination']['total_pages']):
+        yield from api_call('accounts', {
+            'page': '1',
+            'type': 'asset',
+        }, 'GET', endpoint)['data']
+
+
 def update_account(account, result, currency):
     pass
 
 
 def firefly_upload(result: ScrapeResults, endpoint: str):
-    accounts = api_call('accounts', {
-        'page': '1',
-        'type': 'asset',
-    }, 'GET', endpoint)
-    for account in accounts['data']:
+    for account in get_accounts(endpoint):
         number = account['attributes'].get('account_number')
         cleanup = []
         for currency in result.transactions.keys():
