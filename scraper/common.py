@@ -14,8 +14,6 @@ class ScrapeResults:
     nis = 0.0
     usd = 0.0
     eur = 0.0
-    assets = 0.0
-    limits = 0.0
     stocks = []
     transactions = {
         'nis': [],

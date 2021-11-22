@@ -1,5 +1,7 @@
 import logging
+from datetime import date
 from os import environ
+from typing import Optional
 
 import requests
 
@@ -21,61 +23,117 @@ def api_call(request, params=None, method='GET',
     return r.json()
 
 
-def get_accounts(endpoint: str):
-    accounts = api_call('accounts', {
+def paginated_data_call(request, asset='asset', method='GET',
+                        endpoint='http://localhost:5464'):
+    page1 = api_call(request, {
         'page': '1',
-        'type': 'asset',
-    }, 'GET', endpoint)
-    yield from accounts['data']
-    for page in range(1, accounts['meta']['pagination']['total_pages']):
-        yield from api_call('accounts', {
+        'type': asset,
+    }, method, endpoint)
+    yield from page1['data']
+    for page in range(1, page1['meta']['pagination']['total_pages']):
+        yield from api_call(request, {
             'page': '1',
-            'type': 'asset',
-        }, 'GET', endpoint)['data']
+            'type': asset,
+        }, method, endpoint)['data']
 
 
-def update_account(account, result, currency):
+def account_get_all(endpoint: str):
+    yield from paginated_data_call('accounts', endpoint=endpoint)
+
+
+def account_create(
+        name: str,
+        account_type: str = 'asset',
+        iban: str = '',
+        bic: str = '',
+        account_number: str = '',
+        opening_balance: Optional[float] = None,
+        opening_balance_date: Optional[date] = None,
+        virtual_balance: Optional[float] = None,
+        currency_id: Optional[int] = None,
+        currency_code: str = '',
+        active: bool = False,
+        order: Optional[int] = None,
+        include_net_worth: bool = True,
+        account_role: str = '',
+        credit_card_type: str = '',
+        monthly_payment_date: Optional[date] = None,
+        liability_type: str = '',
+        liability_direction: str = '',
+        interest: Optional[float] = None,
+        interest_period: str = '',
+        notes: str = '',
+        latitude: float = 0.0,
+        longitude: float = 0.0,
+        zoom_level: int = 0,
+        endpoint: str = None,
+):
+    return api_call(
+        request='accounts',
+        method='POST',
+        endpoint=endpoint,
+        data={
+            'name': name,
+            'type': account_type,
+            'iban': iban,
+            'bic': bic,
+            'account_number': account_number,
+            'opening_balance': str(opening_balance) if opening_balance else '',
+            'opening_balance_date': opening_balance_date.strftime("%Y-%m-%d")
+            if opening_balance_date else '',
+            'virtual_balance': str(virtual_balance) if virtual_balance else '',
+            'currency_id': str(currency_id) if currency_id else '',
+            'currency_code': currency_code,
+            'active': active,
+            'order': order if order is not None else 1,
+            'include_net_worth': include_net_worth,
+            'account_role': account_role,
+            'credit_card_type': credit_card_type,
+            'monthly_payment_date': monthly_payment_date.strftime("%Y-%m-%d")
+            if monthly_payment_date else '',
+            'liability_type': liability_type,
+            'liability_direction': liability_direction,
+            'interest': str(interest) if interest else '',
+            'interest_period': interest_period,
+            'notes': notes,
+            'latitude': latitude,
+            'longitude': longitude,
+            'zoom_level': zoom_level,
+        }
+    )
+
+
+def update_account(account_number, result, currency, endpoint):
     pass
 
 
 def firefly_upload(result: ScrapeResults, endpoint: str):
-    for account in get_accounts(endpoint):
+    for account in account_get_all(endpoint):
         number = account['attributes'].get('account_number')
         cleanup = []
         for currency in result.transactions.keys():
             if number == f'{result.account}-{currency}':
-                update_account(account, result, currency)
+                update_account(number, result, currency, endpoint)
                 cleanup.append(currency)
         for currency in cleanup:
             result.transactions.pop(currency)
 
-    # account not found, create one
-    api_call('accounts', None, 'POST', endpoint, {
-        "name": "Mizrahi Tefahot USD",
-        "type": "asset",
-        "iban": "",
-        "bic": "",
-        "account_number": result.account,
-        "opening_balance": result.usd,
-        "opening_balance_date": "2021-10-31",
-        "virtual_balance": "",
-        "currency_id": "12",
-        "currency_code": "EUR",
-        "active": True,
-        "order": 1,
-        "include_net_worth": True,
-        "account_role": "defaultAsset",
-        "credit_card_type": "monthlyFull",
-        "monthly_payment_date": "2018-09-17",
-        "liability_type": "loan",
-        "liability_direction": "credit",
-        "interest": "5.3",
-        "interest_period": "monthly",
-        "notes": "Some example notes",
-        "latitude": 51.983333,
-        "longitude": 5.916667,
-        "zoom_level": 6
-    })
+    for currency in result.transactions.keys():
+        opening_balance = 0.0,
+        opening_balance_date = date.today(),
+        for t in result.transactions.get(currency, []):
+            if t['date'] < opening_balance_date:
+                opening_balance_date = t['date']
+                opening_balance = t['balance']
+        number = f'{result.account}-{currency}'
+        account_create(
+            name=f'{result.bank} {currency.upper()}',
+            account_type='asset',
+            account_number=number,
+            opening_balance=opening_balance,
+            opening_balance_date=opening_balance_date,
+        )
+        update_account(number, result, currency, endpoint)
 
 
 if __name__ == '__main__':
