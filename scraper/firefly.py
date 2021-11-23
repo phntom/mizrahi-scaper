@@ -24,10 +24,11 @@ def api_call(request, params=None, method='GET',
 
 
 def paginated_data_call(request, asset='asset', method='GET',
-                        endpoint='http://localhost:5464'):
+                        endpoint='http://localhost:5464', **kwargs):
     page1 = api_call(request, {
         'page': '1',
         'type': asset,
+        **kwargs
     }, method, endpoint)
     yield from page1['data']
     for page in range(1, page1['meta']['pagination']['total_pages']):
@@ -101,6 +102,28 @@ def account_create(
             'zoom_level': zoom_level,
         }
     )
+
+
+def transaction_get_all(
+        endpoint: str,
+        start: Optional[date] = None,
+        end: Optional[date] = None,
+        query_type='all'
+):
+    # type query_type : all, withdrawal, withdrawals, expense, deposit,
+    # deposits, income, transfer, transfers, opening_balance,
+    # reconciliation, special, specials, default
+    yield from paginated_data_call(
+        'transactions',
+        endpoint=endpoint,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        type=query_type,
+    )
+
+
+def transaction_create(endpoint: str,):
+    pass
 
 
 def update_account(account_number, result, currency, endpoint):

@@ -1,4 +1,7 @@
 import re
+from datetime import datetime, date
+from typing import Optional
+
 from dataclasses import dataclass
 
 from selenium.webdriver import Keys
@@ -47,5 +50,10 @@ def safe_click(driver: WebDriver, element, timeout=10):
     element.send_keys(Keys.RETURN)
 
 
-def clean_float(text):
-    return float(re.sub('[^0-9.-]', '', text))
+def clean_float(text: str) -> Optional[float]:
+    text = re.sub('[^0-9.-]', '', text)
+    return float(text) if text else None
+
+
+def date_parse(text: str) -> Optional[date]:
+    return datetime.strptime(text, "%d/%m/%y").date() if text else None

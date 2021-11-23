@@ -11,12 +11,12 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.wait import WebDriverWait
 
 from scraper.common import ScrapeResults, find_element_by_text, safe_click, \
-    clean_float
+    clean_float, date_parse
 
 log = logging.getLogger(__name__)
 
 
-def scrape(target, capabilities):
+def scrape(target, capabilities) -> ScrapeResults:
     result = ScrapeResults()
     result.bank = 'Mizrahi Tefahot'
     driver = webdriver.Remote(
@@ -72,7 +72,7 @@ def scrape_perform_login(driver: WebDriver):
     log.debug("username and password submitted")
 
 
-def scrape_process(driver: WebDriver, result: ScrapeResults):
+def scrape_process(driver: WebDriver, result: ScrapeResults) -> ScrapeResults:
     driver.implicitly_wait(10)
 
     log.debug("waiting for main website to load")
@@ -167,13 +167,19 @@ def process_chequing_nis(driver: WebDriver, result: ScrapeResults):
         cells = row.get_property('cells')
         if len(cells) != 9:
             continue
-        result.transactions['nis'].append(
-            {
-                cell.accessible_name: cell.text
-                for cell in cells
-                if cell.accessible_name
-            }
-        )
+        entry = {
+            cell.accessible_name: cell.text
+            for cell in cells
+            if cell.accessible_name
+        }
+        entry['date'] = date_parse(entry.pop('תאריך'))
+        entry['value_date'] = date_parse(entry.pop('תאריך ערך', ''))
+        entry['balance'] = clean_float(entry.pop('יתרה בש"ח'))
+        entry['value'] = clean_float(entry.pop('זכות/חובה'))
+        entry['serial'] = entry.pop('אסמכתה')
+        entry['description'] = entry.pop('סוג תנועה')
+        entry.pop('לחץ לפתיחת הרחבה', None)
+        result.transactions['nis'].append(entry)
     # todo: handle next page button
 
 
@@ -260,14 +266,16 @@ def process_chequing_foreign(driver: WebDriver, result: ScrapeResults):
             cells = row.get_property('cells')
             if len(cells) != 6:
                 continue
+            if cells[0].text == 'תאריך':
+                continue
             result.transactions[currencies[currency]].append(
                 {
-                    'date': cells[0].text,
-                    'value_date': cells[1].text,
+                    'date': date_parse(cells[0].text),
+                    'value_date': date_parse(cells[1].text),
                     'description': cells[2].text,
                     'serial': cells[3].text,
-                    'value': cells[4].text,
-                    'balance': cells[5].text,
+                    'value': clean_float(cells[4].text),
+                    'balance': clean_float(cells[5].text),
                 }
             )
     driver.switch_to.default_content()

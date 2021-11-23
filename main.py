@@ -6,6 +6,7 @@ from traceback import print_exception
 from selenium.webdriver import DesiredCapabilities
 from selenium.webdriver.remote.remote_connection import LOGGER
 
+from scraper.firefly import firefly_upload
 from scraper.mizrahi import scrape
 
 
@@ -16,7 +17,7 @@ def main():
     parser.add_argument("--target", default="http://127.0.0.1:4444")
     parser.add_argument("--browser", default="chrome")
     parser.add_argument("--type", default="mizrahi")
-    parser.add_argument('--firefly', default='firefly.web.svc:8080')
+    parser.add_argument('--firefly', default='http://firefly.web.svc:8080')
     args = parser.parse_args()
 
     if args.type == 'mizrahi':
@@ -24,7 +25,8 @@ def main():
             args.target,
             getattr(DesiredCapabilities, args.browser.upper()),
         )
-    # firefly_upload(result)
+        if args.firefly:
+            firefly_upload(result, args.firefly)
 
 
 if __name__ == '__main__':
