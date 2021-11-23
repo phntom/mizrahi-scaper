@@ -5,7 +5,7 @@ from typing import Optional
 
 import requests
 
-from scraper.common import ScrapeResults
+from scraper.common import ScrapeResults, id_for_transaction
 
 log = logging.getLogger(__name__)
 
@@ -31,9 +31,9 @@ def paginated_data_call(request, asset='asset', method='GET',
         **kwargs
     }, method, endpoint)
     yield from page1['data']
-    for page in range(1, page1['meta']['pagination']['total_pages']):
+    for page in range(2, page1['meta']['pagination']['total_pages'] + 1):
         yield from api_call(request, {
-            'page': '1',
+            'page': str(page),
             'type': asset,
         }, method, endpoint)['data']
 
@@ -116,18 +116,105 @@ def transaction_get_all(
     yield from paginated_data_call(
         'transactions',
         endpoint=endpoint,
-        start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
+        start=start.strftime("%Y-%m-%d") if start else '',
+        end=end.strftime("%Y-%m-%d") if end else '',
         type=query_type,
     )
 
 
-def transaction_create(endpoint: str,):
-    pass
+def transaction_create(
+        endpoint: str,
+        t_date: date,
+        amount: float,
+        description: str,
+        currency: str,
+        account_name: str,
+        account_id: int,
+        note: str,
+        external_id: str,
+        process_date: Optional[date],
+):
+    if amount > 0:
+        t_type = "deposit"
+        t_target = account_name
+        t_target_id = account_id
+        t_source = "Cash"
+        t_source_id = 4
+    else:
+        t_type = "withdrawal"
+        t_target = "Cash"
+        t_target_id = 4
+        t_source = account_name
+        t_source_id = account_id
+
+    return api_call(
+        request='transactions',
+        method='POST',
+        endpoint=endpoint,
+        data={
+            "error_if_duplicate_hash": True,
+            "apply_rules": True,
+            "fire_webhooks": True,
+            "group_title": "Split transaction title ???",
+            "transactions": [
+                {
+                    "type": t_type,
+                    "date": t_date.strftime("%Y-%m-%d") + "T00:00:00+02:00",
+                    "amount": str(abs(amount)),
+                    "description": description,
+                    "currency_code": currency.upper(),
+                    "source_id": str(t_source_id),
+                    "source_name": t_source,
+                    "destination_id": str(t_target_id),
+                    "destination_name": t_target,
+                    "reconciled": True,
+                    "notes": note,
+                    "external_id": external_id,
+                    "process_date": (process_date.strftime("%Y-%m-%d") + "T00:00:00+02:00") if process_date else '',
+                }
+            ]
+        }
+    )
 
 
-def update_account(account_number, result, currency, endpoint):
-    pass
+def update_account(account_id, result, currency_t, endpoint):
+    date_min = None
+    date_max = None
+    transaction_by_id = set()
+    for currency, entries in result.transactions.items():
+        if currency != currency_t:
+            continue
+        for entry in entries:
+            if date_min is None or entry['date'] < date_min:
+                date_min = entry['date']
+            if date_max is None or entry['date'] > date_max:
+                date_max = entry['date']
+            transaction_by_id.add(id_for_transaction(entry, currency))
+    for entry in transaction_get_all(endpoint, date_min, date_max):
+        for transaction in entry['attributes']['transactions']:
+            external_id = transaction['external_id']
+            if external_id in transaction_by_id:
+                transaction_by_id.remove(external_id)
+    for currency, entries in result.transactions.items():
+        if currency != currency_t:
+            continue
+        account_name = f'{result.bank} {currency.upper()}'
+        for entry in entries:
+            entry_id = id_for_transaction(entry, currency)
+            if entry_id not in transaction_by_id:
+                continue
+            transaction_create(
+                endpoint,
+                entry['date'],
+                entry['value'],
+                entry['description'],
+                currency,
+                account_name,
+                account_id,
+                f"balance: {entry['balance']}",
+                entry_id,
+                entry['value_date'],
+            )
 
 
 def firefly_upload(result: ScrapeResults, endpoint: str):
@@ -136,27 +223,28 @@ def firefly_upload(result: ScrapeResults, endpoint: str):
         cleanup = []
         for currency in result.transactions.keys():
             if number == f'{result.account}-{currency}':
-                update_account(number, result, currency, endpoint)
+                update_account(account['id'], result, currency, endpoint)
                 cleanup.append(currency)
         for currency in cleanup:
             result.transactions.pop(currency)
 
     for currency in result.transactions.keys():
         opening_balance = 0.0,
-        opening_balance_date = date.today(),
+        opening_balance_date = date.today()
         for t in result.transactions.get(currency, []):
-            if t['date'] < opening_balance_date:
+            if t['date'] is not None and t['date'] < opening_balance_date:
                 opening_balance_date = t['date']
                 opening_balance = t['balance']
         number = f'{result.account}-{currency}'
-        account_create(
+        account = account_create(
             name=f'{result.bank} {currency.upper()}',
             account_type='asset',
             account_number=number,
             opening_balance=opening_balance,
             opening_balance_date=opening_balance_date,
+            endpoint=endpoint
         )
-        update_account(number, result, currency, endpoint)
+        update_account(account['id'], result, currency, endpoint)
 
 
 if __name__ == '__main__':
@@ -164,4 +252,7 @@ if __name__ == '__main__':
     log.info('connected to firefly server version {version}'.format(
         **api_call('about')['data']))
 
-    firefly_upload(ScrapeResults(), 'http://localhost:5464')
+    result_x = ScrapeResults()
+    from firefly_secret import test_enrich
+    test_enrich(result_x)
+    firefly_upload(result_x, 'http://localhost:5464')

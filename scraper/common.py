@@ -57,3 +57,10 @@ def clean_float(text: str) -> Optional[float]:
 
 def date_parse(text: str) -> Optional[date]:
     return datetime.strptime(text, "%d/%m/%y").date() if text else None
+
+
+def id_for_transaction(entry: dict, currency: str) -> str:
+    return (
+            entry['date'].strftime("%Y-%m-%d-") + entry['serial'] + '-'
+            + currency.lower()
+    )
