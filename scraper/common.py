@@ -60,7 +60,8 @@ def date_parse(text: str) -> Optional[date]:
 
 
 def id_for_transaction(entry: dict, currency: str) -> str:
+    date_use = entry['date'] if entry.get('date') else entry['value_date']
     return (
-            entry['date'].strftime("%Y-%m-%d-") + entry['serial'] + '-'
+            date_use.strftime("%Y-%m-%d-") + entry['serial'] + '-'
             + currency.lower()
     )

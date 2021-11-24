@@ -227,6 +227,8 @@ def update_account(account_id, result, currency_t, endpoint):
             continue
         account_name = f'{result.bank} {currency.upper()}'
         for entry in entries:
+            if 'serial' not in entry:
+                continue
             entry_id = id_for_transaction(entry, currency)
             if entry_id not in transaction_by_id:
                 continue
