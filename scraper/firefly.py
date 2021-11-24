@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import date
 from os import environ
@@ -16,9 +17,13 @@ def api_call(request, params=None, method='GET',
              endpoint='http://localhost:5464', data=None):
     token = environ.get('FIREFLY_TOKEN')
     headers = {
-        'Accept': 'application/vnd.api+json',
+        'Accept': 'application/vnd.api+json, application/json, text/plain, '
+                  '*/*',
         'Authorization': f'Bearer {token}',
     }
+    if data:
+        data = json.dumps(data, default=str, separators=(',', ':'))
+        headers['Content-Type'] = 'application/json'
     r = requests.request(method=method, url=f'{endpoint}/api/v1/{request}',
                          params=params, headers=headers, data=data)
     r.raise_for_status()
@@ -33,7 +38,8 @@ def paginated_data_call(request, method='GET',
     }, method, endpoint)
     yield from page1['data']
     for page in range(2, page1['meta']['pagination']['total_pages'] + 1):
-        yield from api_call(request, {'page': page, **kwargs}, method, endpoint)['data']
+        yield from \
+        api_call(request, {'page': page, **kwargs}, method, endpoint)['data']
 
 
 def account_get_all(endpoint: str):
@@ -141,46 +147,55 @@ def transaction_create(
         account_name: str,
         account_id: int,
         note: str,
+        internal_id: str,
         external_id: str,
         process_date: Optional[date],
 ):
     if amount > 0:
-        t_type = "deposit"
+        t_type = "transfer"
         t_target = account_name
         t_target_id = account_id
-        t_source = "Cash"
+        t_source = "Cash wallet"
         t_source_id = 4
     else:
-        t_type = "withdrawal"
-        t_target = "Cash"
+        t_type = "transfer"
+        t_target = "Cash wallet"
         t_target_id = 4
         t_source = account_name
         t_source_id = account_id
-
     return api_call(
         request='transactions',
         method='POST',
         endpoint=endpoint,
         data={
-            "error_if_duplicate_hash": "true",
-            "apply_rules": "true",
-            "fire_webhooks": "true",
-            "group_title": f"{t_date} {t_type} of {amount}",
+            # "error_if_duplicate_hash": True,
+            # "apply_rules": True,
+            # "fire_webhooks": True,
+            # "group_title": f"{t_date} {t_type} of {amount}",
             "transactions": [
                 {
                     "type": t_type,
                     "date": t_date.strftime("%Y-%m-%d") + "T00:00:00+02:00",
-                    "amount": str(abs(amount)),
+                    "amount": abs(amount),
                     "description": description,
                     "currency_code": currency.upper(),
                     "source_id": str(t_source_id),
                     "source_name": t_source,
                     "destination_id": str(t_target_id),
                     "destination_name": t_target,
-                    "reconciled": "true",
+                    "category_name": "",
+                    "interest_date": "",
+                    "book_date": "",
+                    "process_date": (
+                            process_date.strftime("%Y-%m-%d")
+                            + "T00:00:00+02:00"
+                    ) if process_date else "",
+                    "due_date": "",
+                    "payment_date": "",
+                    "invoice_date": "",
+                    "internal_reference": internal_id,
                     "notes": note,
                     "external_id": external_id,
-                    "process_date": (process_date.strftime("%Y-%m-%d") + "T00:00:00+02:00") if process_date else '',
                 }
             ]
         }
@@ -195,6 +210,8 @@ def update_account(account_id, result, currency_t, endpoint):
         if currency != currency_t:
             continue
         for entry in entries:
+            if entry['date'] is None:
+                continue
             if date_min is None or entry['date'] < date_min:
                 date_min = entry['date']
             if date_max is None or entry['date'] > date_max:
@@ -202,9 +219,9 @@ def update_account(account_id, result, currency_t, endpoint):
             transaction_by_id.add(id_for_transaction(entry, currency))
     for entry in transaction_get_all(endpoint, date_min, date_max):
         for transaction in entry['attributes']['transactions']:
-            external_id = transaction['external_id']
-            if external_id in transaction_by_id:
-                transaction_by_id.remove(external_id)
+            internal_id = transaction['internal_reference']
+            if internal_id in transaction_by_id:
+                transaction_by_id.remove(internal_id)
     for currency, entries in result.transactions.items():
         if currency != currency_t:
             continue
@@ -223,6 +240,7 @@ def update_account(account_id, result, currency_t, endpoint):
                 account_id,
                 f"balance: {entry['balance']}",
                 entry_id,
+                entry['serial'],
                 entry['value_date'],
             )
 
@@ -277,5 +295,6 @@ if __name__ == '__main__':
 
     result_x = ScrapeResults()
     from firefly_secret import test_enrich
+
     test_enrich(result_x)
     firefly_upload(result_x, 'http://localhost:5464')
