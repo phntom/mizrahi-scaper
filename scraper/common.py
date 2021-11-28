@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, date
+from hashlib import sha256
 from typing import Optional
 
 from dataclasses import dataclass
@@ -59,9 +60,17 @@ def date_parse(text: str) -> Optional[date]:
     return datetime.strptime(text, "%d/%m/%y").date() if text else None
 
 
-def id_for_transaction(entry: dict, currency: str) -> str:
+def id_for_transaction(entry: dict, currency: str, account: str) -> str:
     date_use = entry['date'] if entry.get('date') else entry['value_date']
-    return (
-            date_use.strftime("%Y-%m-%d-") + entry['serial'] + '-'
-            + currency.lower()
-    )
+    m = sha256()
+    m.update(date_use.strftime("%Y-%m-%d-").encode('utf-8'))
+    m.update(entry['serial'].encode('utf-8'))
+    m.update(b'-')
+    m.update(currency.lower().encode('utf-8'))
+    m.update(b'-')
+    m.update(account.encode('utf-8'))
+    m.update(b'-')
+    m.update(str(entry['value']).encode('utf-8'))
+    m.update(b'-')
+    m.update(str(entry['balance']).encode('utf-8'))
+    return m.hexdigest()

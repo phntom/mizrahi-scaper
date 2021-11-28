@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import date
+from datetime import date, timedelta
 from os import environ
 from typing import Optional
 
@@ -152,13 +152,11 @@ def transaction_create(
         process_date: Optional[date],
 ):
     if amount > 0:
-        t_type = "transfer"
         t_target = account_name
         t_target_id = account_id
         t_source = "Cash wallet"
         t_source_id = 4
     else:
-        t_type = "transfer"
         t_target = "Cash wallet"
         t_target_id = 4
         t_source = account_name
@@ -168,13 +166,13 @@ def transaction_create(
         method='POST',
         endpoint=endpoint,
         data={
-            # "error_if_duplicate_hash": True,
-            # "apply_rules": True,
-            # "fire_webhooks": True,
             # "group_title": f"{t_date} {t_type} of {amount}",
+            "error_if_duplicate_hash": True,
+            "apply_rules": True,
+            "fire_webhooks": True,
             "transactions": [
                 {
-                    "type": t_type,
+                    "type": "transfer",
                     "date": t_date.strftime("%Y-%m-%d") + "T00:00:00+02:00",
                     "amount": abs(amount),
                     "description": description,
@@ -202,7 +200,7 @@ def transaction_create(
     )
 
 
-def update_account(account_id, result, currency_t, endpoint):
+def update_account(account_id, account_number, result, currency_t, endpoint):
     date_min = None
     date_max = None
     transaction_by_id = set()
@@ -213,10 +211,12 @@ def update_account(account_id, result, currency_t, endpoint):
             if entry['date'] is None:
                 continue
             if date_min is None or entry['date'] < date_min:
-                date_min = entry['date']
+                date_min = entry['date'] - timedelta(days=1)
             if date_max is None or entry['date'] > date_max:
-                date_max = entry['date']
-            transaction_by_id.add(id_for_transaction(entry, currency))
+                date_max = entry['date'] + timedelta(days=1)
+            transaction_by_id.add(
+                id_for_transaction(entry, currency, account_number)
+            )
     for entry in transaction_get_all(endpoint, date_min, date_max):
         for transaction in entry['attributes']['transactions']:
             internal_id = transaction['internal_reference']
@@ -229,7 +229,7 @@ def update_account(account_id, result, currency_t, endpoint):
         for entry in entries:
             if 'serial' not in entry:
                 continue
-            entry_id = id_for_transaction(entry, currency)
+            entry_id = id_for_transaction(entry, currency, account_number)
             if entry_id not in transaction_by_id:
                 continue
             transaction_create(
@@ -240,9 +240,9 @@ def update_account(account_id, result, currency_t, endpoint):
                 currency,
                 account_name,
                 account_id,
-                f"balance: {entry['balance']}",
+                f"balance: {entry['balance']} serial: {entry['serial']}",
                 entry_id,
-                entry['serial'],
+                "",
                 entry['value_date'],
             )
 
@@ -255,7 +255,7 @@ def firefly_upload(result: ScrapeResults, endpoint: str):
         cleanup = []
         for currency in result.transactions.keys():
             if number == f'{result.account}-{currency}':
-                update_account(account['id'], result, currency, endpoint)
+                update_account(account['id'], number, result, currency, endpoint)
                 cleanup.append(currency)
         for currency in cleanup:
             result.transactions.pop(currency)
@@ -265,8 +265,8 @@ def firefly_upload(result: ScrapeResults, endpoint: str):
         opening_balance_date = date.today()
         for t in result.transactions.get(currency, []):
             if t['date'] is not None and t['date'] < opening_balance_date:
-                opening_balance_date = t['date']
-                opening_balance = t['balance']
+                opening_balance_date = t['date'] - timedelta(days=1)
+                opening_balance = t['balance'] - t['value']
         number = f'{result.account}-{currency}'
         account = account_create(
             name=f'{result.bank} {currency.upper()}',
@@ -274,7 +274,7 @@ def firefly_upload(result: ScrapeResults, endpoint: str):
             account_role='defaultAsset',
             account_number=number,
             opening_balance=opening_balance,
-            opening_balance_date=opening_balance_date,
+            opening_balance_date=opening_balance_date if opening_balance else None,
             endpoint=endpoint,
             active=True,
             include_net_worth=True,
@@ -287,7 +287,7 @@ def firefly_upload(result: ScrapeResults, endpoint: str):
             interest=0.0,
             interest_period='monthly',
         )['data']
-        update_account(account['id'], result, currency, endpoint)
+        update_account(account['id'], number, result, currency, endpoint)
 
 
 if __name__ == '__main__':
